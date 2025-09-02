@@ -1,0 +1,67 @@
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+.dir-locals.el
+
+# Org-mode
+.org-id-locations
+*_archive
+
+# Cask
+.cask/
+dist/
+
+# Projectile
+.projectile
+
+# Package artifacts
+probe-search-*.tar
+*.tar.gz
+
+# Build artifacts
+/build/
+/target/
+
+# Test artifacts
+/test-results/
+/coverage/
+*.log
+
+# Documentation
+/doc/auto/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+*.swp
+*.swo
+.vscode/
+
+# AI tools
+.aider*
+
+# Temporary files
+/tmp/
+*.tmp
+*.bak
+*.orig
+
+# Dependencies
+/node_modules/
+/vendor/
+
+# Environment
+.env
+.env.local
+
+# Cache
+.cache/
+*.cache
