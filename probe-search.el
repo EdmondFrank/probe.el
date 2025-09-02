@@ -106,9 +106,9 @@
 
 (defface probe-search-match-face
   '((((class color) (background light))
-     :background "yellow1" :foreground "black")
+     :background "yellow1" :foreground "black" :weight bold)
     (((class color) (background dark))
-     :background "yellow3" :foreground "black")
+     :background "RoyalBlue4" :foreground "white" :weight bold)
     (t :inherit match))
   "Face used for the portion of a line that matches the search term."
   :group 'probe-search)
@@ -176,6 +176,7 @@
     (define-key map (kbd "a") #'probe-query)
     (define-key map (kbd "t") #'probe-search-toggle-tests)
     (define-key map (kbd "r") #'ignore)
+    (define-key map (kbd "TAB") #'probe-search-toggle-file-visibility)
     map)
   "Keymap for `probe-search-mode'.")
 
@@ -254,7 +255,7 @@ JSON-DATA is the parsed JSON response from probe."
               (file-count 0))
           ;; Insert search header
           (insert "\n")
-          (insert (propertize (format "  🔍 Search results for: %s\n" probe-search--search-term)
+          (insert (propertize (format "  Search results for: %s\n" probe-search--search-term)
                             'face 'probe-search-filename-face))
           (insert (propertize (format "  Found %d results\n" (length results))
                             'face 'probe-search-meta-face))
@@ -275,7 +276,7 @@ JSON-DATA is the parsed JSON response from probe."
                     (let* ((relative-filename (file-relative-name filename 
                                                                   (probe-search--project-root)))
                            (pretty-filename
-                            (propertize (concat "📄 " relative-filename)
+                            (propertize relative-filename
                                        'face 'probe-search-filename-face
                                        'probe-search-filename filename
                                        'read-only t
@@ -295,12 +296,100 @@ JSON-DATA is the parsed JSON response from probe."
                          ;; Highlight matches in content
                          (highlighted-content (probe-search--highlight-matches 
                                              content probe-search--search-term)))
-                    (insert pretty-line-num "" highlighted-content "\n")))))))))
+                    (insert pretty-line-num highlighted-content "\n")))))))))
     (setq buffer-read-only t)
     (goto-char (point-min))))
 
 (defvar-local probe-search--collected-output "")
 (put 'probe-search--collected-output 'permanent-local t)
+
+(defvar-local probe-search--collapsed-files nil
+  "List of filenames that are currently collapsed.")
+(put 'probe-search--collapsed-files 'permanent-local t)
+
+(defvar-local probe-search--file-overlays nil
+  "Alist of (filename . overlay) for hidden file sections.")
+(put 'probe-search--file-overlays 'permanent-local t)
+
+(defun probe-search-toggle-file-visibility ()
+  "Toggle visibility of the file section at point."
+  (interactive)
+  (let* ((pos (point))
+         (filename (or (get-text-property pos 'probe-search-filename)
+                      ;; Try to find filename from current or previous line
+                      (save-excursion
+                        (beginning-of-line)
+                        (when (re-search-backward "^[^ \t\n]" nil t)
+                          (get-text-property (point) 'probe-search-filename))))))
+    (if filename
+        (if (member filename probe-search--collapsed-files)
+            (probe-search--expand-file filename)
+          (probe-search--collapse-file filename))
+      (message "Not on a file section"))))
+
+(defun probe-search--collapse-file (filename)
+  "Collapse the file section for FILENAME."
+  (add-to-list 'probe-search--collapsed-files filename)
+  (save-excursion
+    (goto-char (point-min))
+    (let ((found nil))
+      (while (and (not found) (re-search-forward "^[^ \t\n]" nil t))
+        (when (equal (get-text-property (point) 'probe-search-filename) filename)
+          (setq found t)
+          (let* ((file-start (point-at-bol))
+                 ;; Find the content start (after the filename line)
+                 (content-start (save-excursion
+                                  (forward-line 1)
+                                  (while (and (not (eobp))
+                                              (looking-at "^\s-*$\|^\s-*─"))
+                                    (forward-line 1))
+                                  (point)))
+                 ;; Find the end of this file's results
+                 (content-end (save-excursion
+                                (goto-char content-start)
+                                ;; Look for the next file header or separator
+                                (if (re-search-forward "^[^ \t\n].*\\|^─\\{60,\\}$" nil t)
+                                    (progn
+                                      ;; Move back to start of the line we found
+                                      (beginning-of-line)
+                                      ;; If we're on a separator line, we want to stop before it
+                                      (if (looking-at "^─")
+                                          ;; Move back one line to not include the separator
+                                          (forward-line -1)
+                                        ;; We're on a file header, stay at beginning of that line
+                                        nil)
+                                      (end-of-line)
+                                      (point))
+                                  (point-max)))))
+            (when (> content-end content-start)
+              (let ((ov (make-overlay content-start content-end)))
+                (overlay-put ov 'invisible 'probe-search-collapsed)
+                (overlay-put ov 'probe-search-collapsed t)
+                (push (cons filename ov) probe-search--file-overlays)))
+            ;; Update the file header to show collapsed state
+            (goto-char file-start)
+            (when (looking-at "^\\([^[:space:]].*\\)$")
+              (let ((ov (make-overlay file-start (line-end-position))))
+                (overlay-put ov 'display 
+                             (propertize (format "%s [+] (click to expand)" 
+                                                 (file-relative-name filename (probe-search--project-root)))
+                                         'face (list :foreground (face-attribute 'probe-search-filename-face :foreground)
+                                                     :weight 'bold)))
+                (push (cons (concat filename "-header") ov) probe-search--file-overlays)))))))
+    (message "Collapsed %s" (file-name-nondirectory filename))))
+
+(defun probe-search--expand-file (filename)
+  "Expand the file section for FILENAME."
+  (setq probe-search--collapsed-files (remove filename probe-search--collapsed-files))
+  ;; Remove all overlays for this file
+  (let ((remaining-overlays nil))
+    (dolist (ov-pair probe-search--file-overlays)
+      (if (or (equal (car ov-pair) filename)
+              (equal (car ov-pair) (concat filename "-header")))
+          (delete-overlay (cdr ov-pair))
+        (push ov-pair remaining-overlays)))
+    (setq probe-search--file-overlays (nreverse remaining-overlays)))
+  (message "Expanded %s" (file-name-nondirectory filename)))
 
 (defun probe-search--process-filter (process output)
   "Handle output from the probe process, collecting JSON data."

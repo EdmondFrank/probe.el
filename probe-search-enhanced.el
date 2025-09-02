@@ -20,14 +20,49 @@
         mode
       'prog-mode)))
 
-(defun probe-search--apply-syntax-highlighting (code filename)
-  "Apply syntax highlighting to CODE based on FILENAME's mode."
+(defun probe-search--apply-syntax-highlighting (code filename search-term)
+  "Apply syntax highlighting to CODE based on FILENAME's mode.
+  Also highlight SEARCH-TERM matches."
   (let ((mode (probe-search--get-mode-for-file filename)))
     (with-temp-buffer
       (insert code)
       (delay-mode-hooks (funcall mode))
       (font-lock-ensure)
-      (buffer-string))))
+      ;; Now highlight search matches on top of syntax highlighting
+      (goto-char (point-min))
+      (let ((case-fold-search t))
+        (dolist (word (split-string search-term "[ \t\n]+" t))
+          (when (> (length word) 0)
+            (goto-char (point-min))
+            (while (re-search-forward (regexp-quote word) nil t)
+              (let ((match-start (match-beginning 0))
+                    (match-end (match-end 0)))
+                ;; Get existing face at this position
+                (let ((existing-face (get-text-property match-start 'face))
+                      (highlight-bg (if (eq (frame-parameter nil 'background-mode) 'dark)
+                                        "#3a5d9f"  ; Softer blue for dark mode
+                                      "#ffff88"))) ; Softer yellow for light mode
+                  ;; Preserve existing syntax highlighting while adding background
+                  (if existing-face
+                      (progn
+                        (put-text-property match-start match-end 
+                                           'face 
+                                           (if (listp existing-face)
+                                               `(,@existing-face (:background ,highlight-bg :weight bold))
+                                             `(,existing-face (:background ,highlight-bg :weight bold))))
+                        (put-text-property match-start match-end 
+                                           'font-lock-face 
+                                           (if (listp existing-face)
+                                               `(,@existing-face (:background ,highlight-bg :weight bold))
+                                             `(,existing-face (:background ,highlight-bg :weight bold)))))
+                    ;; No existing face, just apply highlight
+                    (put-text-property match-start match-end 
+                                       'face 
+                                       `(:background ,highlight-bg :weight bold))
+                    (put-text-property match-start match-end 
+                                       'font-lock-face 
+                                       `(:background ,highlight-bg :weight bold))))))))
+        (buffer-string)))))
 
 (defun probe-search--insert-json-results-enhanced (json-data)
   "Insert JSON results from probe search with enhanced formatting.
@@ -76,12 +111,15 @@ JSON-DATA is the parsed JSON response from probe."
                     (let* ((relative-filename (file-relative-name filename 
                                                                  (probe-search--project-root)))
                            (pretty-filename
-                            (propertize (concat "📄 " relative-filename)
+                            (propertize relative-filename
                                       'face 'probe-search-filename-face
                                       'probe-search-filename filename
                                       'read-only t
                                       'front-sticky t)))
                       (insert pretty-filename)
+                      ;; Add collapse/expand indicator
+                      (insert (propertize " [-] (click to collapse)" 
+                                        'face 'probe-search-meta-face))
                       (when score
                         (insert (propertize (format " (score: %.3f)" score)
                                           'face 'probe-search-meta-face)))
@@ -94,7 +132,7 @@ JSON-DATA is the parsed JSON response from probe."
                                      (aref lines (1- (length lines)))
                                    (car (last lines))))
                          (highlighted-content (probe-search--apply-syntax-highlighting 
-                                             content filename)))
+                                             content filename probe-search--search-term)))
                     ;; Add line numbers to each line
                     (let ((content-lines (split-string highlighted-content "\n")))
                       (dotimes (i (length content-lines))
