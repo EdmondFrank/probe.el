@@ -19,7 +19,7 @@ compile:
 		--eval "(setq byte-compile-error-on-warn t)" \
 		-f batch-byte-compile $(ELFILES)
 
-test: compile
+test: deps compile
 	$(CASK) exec ert-runner
 
 lint:

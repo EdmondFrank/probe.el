@@ -60,7 +60,23 @@
   :group 'probe-search)
 
 (defcustom probe-search-reranker 'bm25
-  "Ranking algorithm for search results (placeholder for future use).")
+  "Ranking algorithm for search results.
+Available options:
+- bm25: BM25 ranking algorithm (default)
+- hybrid: Hybrid ranking combining multiple signals
+- hybrid2: Alternative hybrid ranking
+- tfidf: TF-IDF ranking
+- ms-marco-tinybert: Microsoft MARCO TinyBERT model
+- ms-marco-minilm-l6: Microsoft MARCO MiniLM L6 model
+- ms-marco-minilm-l12: Microsoft MARCO MiniLM L12 model"
+  :type '(choice (const :tag "BM25 (default)" bm25)
+                 (const :tag "Hybrid" hybrid)
+                 (const :tag "Hybrid2" hybrid2)
+                 (const :tag "TF-IDF" tfidf)
+                 (const :tag "MS MARCO TinyBERT" ms-marco-tinybert)
+                 (const :tag "MS MARCO MiniLM L6" ms-marco-minilm-l6)
+                 (const :tag "MS MARCO MiniLM L12" ms-marco-minilm-l12))
+  :group 'probe-search)
 
 (defcustom probe-search-include-tests nil
   "Whether to include test files in search results."
@@ -175,7 +191,7 @@
     (define-key map (kbd "s") #'probe-search)
     (define-key map (kbd "a") #'probe-query)
     (define-key map (kbd "t") #'probe-search-toggle-tests)
-    (define-key map (kbd "r") #'ignore)
+    (define-key map (kbd "r") #'probe-search-rerank)
     (define-key map (kbd "TAB") #'probe-search-toggle-file-visibility)
     map)
   "Keymap for `probe-search-mode'.")
@@ -251,13 +267,14 @@ JSON-DATA is the parsed JSON response from probe."
           (progn
             (insert "\n  ")
             (insert (propertize "No results found.\n" 'face 'probe-search-meta-face)))
-        (let ((current-filename nil)
-              (file-count 0))
+        (let ((current-filename nil))
           ;; Insert search header
           (insert "\n")
           (insert (propertize (format "  Search results for: %s\n" probe-search--search-term)
                             'face 'probe-search-filename-face))
-          (insert (propertize (format "  Found %d results\n" (length results))
+          (insert (propertize (format "  Found %d results (reranker: %s)\n" 
+                                    (length results)
+                                    (symbol-name probe-search-reranker))
                             'face 'probe-search-meta-face))
           (insert (propertize (make-string 70 ?─) 'face 'probe-search-separator-face))
           (insert "\n\n")
@@ -336,7 +353,7 @@ JSON-DATA is the parsed JSON response from probe."
       (while (and (not found) (re-search-forward "^[^ \t\n]" nil t))
         (when (equal (get-text-property (point) 'probe-search-filename) filename)
           (setq found t)
-          (let* ((file-start (point-at-bol))
+          (let* ((file-start (line-beginning-position))
                  ;; Find the content start (after the filename line)
                  (content-start (save-excursion
                                   (forward-line 1)
@@ -528,6 +545,8 @@ JSON-STRING is the string that failed to parse."
   (append
    (list (if ast-mode "query" "search"))
    (list "--format" "json")
+   (when probe-search-reranker
+     (list "--reranker" (symbol-name probe-search-reranker)))
    (when probe-search-include-tests
      (list "--allow-tests"))
    (when probe-search-max-results
@@ -603,10 +622,28 @@ If AST-MODE is non-nil, use AST query mode."
   (message "Test files %s in search results"
            (if probe-search-include-tests "included" "excluded")))
 
-(defun probe-search-rerank (reranker)
+(defun probe-search-rerank ()
   "Change the reranking algorithm for search results."
-  (interactive "sReranker (currently disabled): ")
-  (message "Reranking parameter currently disabled"))
+  (interactive)
+  (let ((choices '(("BM25 (default)" . bm25)
+                   ("Hybrid" . hybrid)
+                   ("Hybrid2" . hybrid2)
+                   ("TF-IDF" . tfidf)
+                   ("MS MARCO TinyBERT" . ms-marco-tinybert)
+                   ("MS MARCO MiniLM L6" . ms-marco-minilm-l6)
+                   ("MS MARCO MiniLM L12" . ms-marco-minilm-l12))))
+    (let* ((current (symbol-name probe-search-reranker))
+           (choice (completing-read 
+                    (format "Select reranker (current: %s): " current)
+                    (mapcar #'car choices)
+                    nil t))
+           (new-reranker (cdr (assoc choice choices))))
+      (when new-reranker
+        (setq probe-search-reranker new-reranker)
+        (message "Reranker changed to %s" (symbol-name new-reranker))
+        ;; Restart the search with new reranker if we have a current search
+        (when probe-search--search-term
+          (probe-search-restart))))))
 
 (defun probe-search-menu ()
   "Interactive menu for probe search configuration."

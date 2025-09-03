@@ -13,6 +13,15 @@
 ;;
 ;;; Code:
 
+;; Forward declarations to avoid circular dependency
+(declare-function probe-search--project-root "probe-search")
+(defvar probe-search--search-term)
+(defvar probe-search-reranker)
+(defvar probe-search-meta-face)
+(defvar probe-search-filename-face)
+(defvar probe-search-line-number-face)
+(defvar probe-search-separator-face)
+
 (defun probe-search--get-mode-for-file (filename)
   "Get the appropriate major mode for FILENAME."
   (let ((mode (assoc-default filename auto-mode-alist 'string-match)))
@@ -31,37 +40,38 @@
       ;; Now highlight search matches on top of syntax highlighting
       (goto-char (point-min))
       (let ((case-fold-search t))
-        (dolist (word (split-string search-term "[ \t\n]+" t))
-          (when (> (length word) 0)
-            (goto-char (point-min))
-            (while (re-search-forward (regexp-quote word) nil t)
-              (let ((match-start (match-beginning 0))
-                    (match-end (match-end 0)))
-                ;; Get existing face at this position
-                (let ((existing-face (get-text-property match-start 'face))
-                      (highlight-bg (if (eq (frame-parameter nil 'background-mode) 'dark)
+        (when (stringp search-term)
+          (dolist (word (split-string search-term "[ \t\n]+" t))
+            (when (> (length word) 0)
+              (goto-char (point-min))
+              (while (re-search-forward (regexp-quote word) nil t)
+                (let ((match-start (match-beginning 0))
+                      (match-end (match-end 0)))
+                  ;; Get existing face at this position
+                  (let ((existing-face (get-text-property match-start 'face))
+                        (highlight-bg (if (eq (frame-parameter nil 'background-mode) 'dark)
                                         "#3a5d9f"  ; Softer blue for dark mode
                                       "#ffff88"))) ; Softer yellow for light mode
-                  ;; Preserve existing syntax highlighting while adding background
-                  (if existing-face
-                      (progn
-                        (put-text-property match-start match-end 
+                    ;; Preserve existing syntax highlighting while adding background
+                    (if existing-face
+                        (progn
+                          (put-text-property match-start match-end 
                                            'face 
                                            (if (listp existing-face)
                                                `(,@existing-face (:background ,highlight-bg :weight bold))
                                              `(,existing-face (:background ,highlight-bg :weight bold))))
-                        (put-text-property match-start match-end 
+                          (put-text-property match-start match-end 
                                            'font-lock-face 
                                            (if (listp existing-face)
                                                `(,@existing-face (:background ,highlight-bg :weight bold))
                                              `(,existing-face (:background ,highlight-bg :weight bold)))))
-                    ;; No existing face, just apply highlight
-                    (put-text-property match-start match-end 
+                      ;; No existing face, just apply highlight
+                      (put-text-property match-start match-end 
                                        'face 
                                        `(:background ,highlight-bg :weight bold))
-                    (put-text-property match-start match-end 
+                      (put-text-property match-start match-end 
                                        'font-lock-face 
-                                       `(:background ,highlight-bg :weight bold))))))))
+                                       `(:background ,highlight-bg :weight bold)))))))))
         (buffer-string)))))
 
 (defun probe-search--insert-json-results-enhanced (json-data)
@@ -84,11 +94,12 @@ JSON-DATA is the parsed JSON response from probe."
         (let ((current-filename nil)
               (file-count 0))
           ;; Insert header
-          (insert (propertize (format "\n  Found %d results in %d files\n" 
+          (insert (propertize (format "\n  Found %d results in %d files (reranker: %s)\n" 
                                     (length results)
                                     (length (delete-dups (mapcar (lambda (r) 
                                                                   (cdr (assoc 'file r)))
-                                                                results))))
+                                                                results)))
+                                    (symbol-name probe-search-reranker))
                             'face 'probe-search-meta-face))
           (insert (propertize (make-string 70 ?─) 'face 'probe-search-separator-face))
           (insert "\n\n")
@@ -128,9 +139,6 @@ JSON-DATA is the parsed JSON response from probe."
                   
                   ;; Format and insert code block
                   (let* ((line-start (if (vectorp lines) (aref lines 0) (car lines)))
-                         (line-end (if (vectorp lines) 
-                                     (aref lines (1- (length lines)))
-                                   (car (last lines))))
                          (highlighted-content (probe-search--apply-syntax-highlighting 
                                              content filename probe-search--search-term)))
                     ;; Add line numbers to each line
