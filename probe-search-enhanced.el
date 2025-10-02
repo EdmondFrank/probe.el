@@ -33,46 +33,79 @@
   "Apply syntax highlighting to CODE based on FILENAME's mode.
   Also highlight SEARCH-TERM matches."
   (let ((mode (probe-search--get-mode-for-file filename)))
-    (with-temp-buffer
-      (insert code)
-      (delay-mode-hooks (funcall mode))
-      (font-lock-ensure)
-      ;; Now highlight search matches on top of syntax highlighting
-      (goto-char (point-min))
-      (let ((case-fold-search t))
-        (when (stringp search-term)
-          (dolist (word (split-string search-term "[ \t\n]+" t))
-            (when (> (length word) 0)
-              (goto-char (point-min))
-              (while (re-search-forward (regexp-quote word) nil t)
-                (let ((match-start (match-beginning 0))
-                      (match-end (match-end 0)))
-                  ;; Get existing face at this position
-                  (let ((existing-face (get-text-property match-start 'face))
-                        (highlight-bg (if (eq (frame-parameter nil 'background-mode) 'dark)
-                                        "#3a5d9f"  ; Softer blue for dark mode
-                                      "#ffff88"))) ; Softer yellow for light mode
-                    ;; Preserve existing syntax highlighting while adding background
-                    (if existing-face
-                        (progn
+    (condition-case _
+        (with-temp-buffer
+          (insert code)
+          ;; Ensure the mode is loaded before using it
+          (when (and mode (not (fboundp mode)))
+            (require mode nil t))
+          
+          ;; Special handling for CSS modes that might have missing functions
+          (when (and mode (memq mode '(css-mode)))
+            ;; Check if css-syntax-propertize-function is available
+            (unless (fboundp 'css-syntax-propertize-function)
+              ;; Define a minimal fallback for CSS syntax propertize
+              (defalias 'css-syntax-propertize-function
+                (lambda (_start _end)
+                  ;; Minimal CSS syntax propertize function
+                  nil))))
+          
+          (delay-mode-hooks (funcall mode))
+          ;; Ensure font-lock is set up before calling font-lock-ensure
+          (when (and (bound-and-true-p font-lock-mode)
+                     font-lock-defaults)
+            (font-lock-ensure))
+          ;; Now highlight search matches on top of syntax highlighting
+          (goto-char (point-min))
+          (let ((case-fold-search t))
+            (when (stringp search-term)
+              (dolist (word (split-string search-term "[ \t\n]+" t))
+                (when (> (length word) 0)
+                  (goto-char (point-min))
+                  (while (re-search-forward (regexp-quote word) nil t)
+                    (let ((match-start (match-beginning 0))
+                          (match-end (match-end 0)))
+                      ;; Get existing face at this position
+                      (let ((existing-face (get-text-property match-start 'face))
+                            (highlight-bg (if (eq (frame-parameter nil 'background-mode) 'dark)
+                                            "#3a5d9f"  ; Softer blue for dark mode
+                                          "#ffff88"))) ; Softer yellow for light mode
+                        ;; Preserve existing syntax highlighting while adding background
+                        (if existing-face
+                            (progn
+                              (put-text-property match-start match-end 
+                                               'face 
+                                               (if (listp existing-face)
+                                                   `(,@existing-face (:background ,highlight-bg :weight bold))
+                                                 `(,existing-face (:background ,highlight-bg :weight bold))))
+                              (put-text-property match-start match-end 
+                                               'font-lock-face 
+                                               (if (listp existing-face)
+                                                   `(,@existing-face (:background ,highlight-bg :weight bold))
+                                                 `(,existing-face (:background ,highlight-bg :weight bold)))))
+                          ;; No existing face, just apply highlight
                           (put-text-property match-start match-end 
                                            'face 
-                                           (if (listp existing-face)
-                                               `(,@existing-face (:background ,highlight-bg :weight bold))
-                                             `(,existing-face (:background ,highlight-bg :weight bold))))
+                                           `(:background ,highlight-bg :weight bold))
                           (put-text-property match-start match-end 
                                            'font-lock-face 
-                                           (if (listp existing-face)
-                                               `(,@existing-face (:background ,highlight-bg :weight bold))
-                                             `(,existing-face (:background ,highlight-bg :weight bold)))))
-                      ;; No existing face, just apply highlight
-                      (put-text-property match-start match-end 
-                                       'face 
-                                       `(:background ,highlight-bg :weight bold))
-                      (put-text-property match-start match-end 
-                                       'font-lock-face 
-                                       `(:background ,highlight-bg :weight bold)))))))))
-        (buffer-string)))))
+                                           `(:background ,highlight-bg :weight bold)))))))))
+            (buffer-string)))
+      ;; Handle errors gracefully
+      (error 
+       ;; If syntax highlighting fails, just return the code with basic search term highlighting
+       (with-temp-buffer
+         (insert code)
+         (goto-char (point-min))
+         (let ((case-fold-search t))
+           (when (stringp search-term)
+             (dolist (word (split-string search-term "[ \t\n]+" t))
+               (when (> (length word) 0)
+                 (goto-char (point-min))
+                 (while (re-search-forward (regexp-quote word) nil t)
+                   (put-text-property (match-beginning 0) (match-end 0)
+                                     'font-lock-face 'probe-search-match-face))))))
+         (buffer-string))))))
 
 (defun probe-search--insert-json-results-enhanced (json-data)
   "Insert JSON results from probe search with enhanced formatting.

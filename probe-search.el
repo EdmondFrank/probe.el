@@ -36,7 +36,6 @@
 
 ;;; Code:
 
-(require 's)
 (require 'cl-lib)
 (require 'json)
 (require 'project)
@@ -212,7 +211,7 @@ Available options:
 
 (defun probe-search--escape-backslash (s)
   "Escape occurrences of backslashes in S."
-  (s-replace "\\" "\\\\" s))
+  (replace-regexp-in-string "\\\\" "\\\\\\\\" s))
 
 (defun probe-search--propertize-hits (line-contents)
   "Given LINE-CONTENTS from probe, replace ANSI color codes
