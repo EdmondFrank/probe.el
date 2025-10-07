@@ -3,7 +3,7 @@
 ;; Copyright (C) 2024 Edmond Frank
 
 ;; Author: Edmond Frank <edmondfrank@hotmail.com>
-;; Version: 0.1.0
+;; Version: 0.2.0
 ;; Package-Requires: ((emacs "26.1") (s "1.13.0"))
 ;; Keywords: tools, search, semantic, ast, code-navigation, convenience
 ;; URL: https://github.com/edmondfrank/probe.el
@@ -232,7 +232,7 @@ with a text face property `probe-search-match-face'."
     (dolist (word (split-string search-term "[ \t\n]+" t))
       (when (> (length word) 0)
         ;; Create a case-insensitive regexp for the word
-        (let ((regexp (concat "\\b" (regexp-quote word) "\\b")))
+        (let ((regexp (concat "\\<" (regexp-quote word))))
           (setq highlighted-text
                 (replace-regexp-in-string
                  regexp
@@ -653,6 +653,40 @@ If AST-MODE is non-nil, use AST query mode."
        (call-interactively #'probe-search))
       ((or "AST query" "2")
        (call-interactively #'probe-query)))))
+
+;;; Test functions
+
+(defun probe-search--test-highlight-matches ()
+  "Run tests for `probe-search--highlight-matches`."
+  (interactive)
+  (message "Running highlight matches tests...")
+  (let ((failures 0)
+        (successes 0))
+    (cl-flet ((expect-highlight-at (text term pos)
+                (let ((res (probe-search--highlight-matches text term)))
+                  (if (get-text-property pos 'face res)
+                      (progn (setq successes (1+ successes))
+                             (message "PASS: Highlight for '%s' in '%s' at %d" term text pos))
+                    (progn (setq failures (1+ failures))
+                           (message "FAIL: Expected highlight for '%s' in '%s' at %d" term text pos)))))
+              (expect-no-highlight-at (text term pos)
+                (let ((res (probe-search--highlight-matches text term)))
+                  (if (not (get-text-property pos 'face res))
+                      (progn (setq successes (1+ successes))
+                             (message "PASS: No highlight for '%s' in '%s' at %d" term text pos))
+                    (progn (setq failures (1+ failures))
+                           (message "FAIL: Unexpected highlight for '%s' in '%s' at %d" term text pos))))))
+
+      (expect-highlight-at "hello world" "hello" 0)
+      (expect-no-highlight-at "hello world" "hello" 6)
+      (expect-highlight-at "hello world" "world" 6)
+      (expect-no-highlight-at "hello world" "o" 4)
+      (expect-highlight-at "testing" "test" 0)
+      (expect-highlight-at "a test" "test" 2)
+      (expect-highlight-at "Test" "test" 0)
+      (expect-highlight-at "two tests" "test" 4)
+      (expect-highlight-at "my-test" "test" 3))
+    (message "Tests finished. %d successes, %d failures." successes failures)))
 
 (provide 'probe-search)
 ;;; probe-search.el ends here

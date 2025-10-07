@@ -13,6 +13,8 @@
 ;;
 ;;; Code:
 
+(require 'cl-lib)
+
 ;; Forward declarations to avoid circular dependency
 (declare-function probe-search--project-root "probe-search")
 (defvar probe-search--search-term)
@@ -21,6 +23,7 @@
 (defvar probe-search-filename-face)
 (defvar probe-search-line-number-face)
 (defvar probe-search-separator-face)
+(defvar probe-search-match-face)
 
 (defun probe-search--get-mode-for-file (filename)
   "Get the appropriate major mode for FILENAME."
@@ -32,80 +35,33 @@
 (defun probe-search--apply-syntax-highlighting (code filename search-term)
   "Apply syntax highlighting to CODE based on FILENAME's mode.
   Also highlight SEARCH-TERM matches."
-  (let ((mode (probe-search--get-mode-for-file filename)))
-    (condition-case _
-        (with-temp-buffer
-          (insert code)
-          ;; Ensure the mode is loaded before using it
-          (when (and mode (not (fboundp mode)))
-            (require mode nil t))
-          
-          ;; Special handling for CSS modes that might have missing functions
-          (when (and mode (memq mode '(css-mode)))
-            ;; Check if css-syntax-propertize-function is available
-            (unless (fboundp 'css-syntax-propertize-function)
-              ;; Define a minimal fallback for CSS syntax propertize
-              (defalias 'css-syntax-propertize-function
-                (lambda (_start _end)
-                  ;; Minimal CSS syntax propertize function
-                  nil))))
-          
-          (delay-mode-hooks (funcall mode))
-          ;; Ensure font-lock is set up before calling font-lock-ensure
-          (when (and (bound-and-true-p font-lock-mode)
-                     font-lock-defaults)
-            (font-lock-ensure))
-          ;; Now highlight search matches on top of syntax highlighting
-          (goto-char (point-min))
-          (let ((case-fold-search t))
-            (when (stringp search-term)
-              (dolist (word (split-string search-term "[ \t\n]+" t))
-                (when (> (length word) 0)
-                  (goto-char (point-min))
-                  (while (re-search-forward (regexp-quote word) nil t)
-                    (let ((match-start (match-beginning 0))
-                          (match-end (match-end 0)))
-                      ;; Get existing face at this position
-                      (let ((existing-face (get-text-property match-start 'face))
-                            (highlight-bg (if (eq (frame-parameter nil 'background-mode) 'dark)
-                                            "#3a5d9f"  ; Softer blue for dark mode
-                                          "#ffff88"))) ; Softer yellow for light mode
-                        ;; Preserve existing syntax highlighting while adding background
-                        (if existing-face
-                            (progn
-                              (put-text-property match-start match-end 
-                                               'face 
-                                               (if (listp existing-face)
-                                                   `(,@existing-face (:background ,highlight-bg :weight bold))
-                                                 `(,existing-face (:background ,highlight-bg :weight bold))))
-                              (put-text-property match-start match-end 
-                                               'font-lock-face 
-                                               (if (listp existing-face)
-                                                   `(,@existing-face (:background ,highlight-bg :weight bold))
-                                                 `(,existing-face (:background ,highlight-bg :weight bold)))))
-                          ;; No existing face, just apply highlight
-                          (put-text-property match-start match-end 
-                                           'face 
-                                           `(:background ,highlight-bg :weight bold))
-                          (put-text-property match-start match-end 
-                                           'font-lock-face 
-                                           `(:background ,highlight-bg :weight bold)))))))))
-            (buffer-string)))
-      ;; Handle errors gracefully
-      (error 
-       ;; If syntax highlighting fails, just return the code with basic search term highlighting
-       (with-temp-buffer
-         (insert code)
-         (goto-char (point-min))
-         (let ((case-fold-search t))
-           (when (stringp search-term)
-             (dolist (word (split-string search-term "[ \t\n]+" t))
-               (when (> (length word) 0)
-                 (goto-char (point-min))
-                 (while (re-search-forward (regexp-quote word) nil t)
-                   (put-text-property (match-beginning 0) (match-end 0)
-                                     'font-lock-face 'probe-search-match-face))))))
-         (buffer-string))))))
+  (with-temp-buffer
+    (insert code)
+    (let ((mode (probe-search--get-mode-for-file filename)))
+      (condition-case err
+          (progn
+            (when (and mode (not (fboundp mode)))
+              (require mode nil t))
+            (when (and mode (fboundp mode))
+              (funcall mode)
+              (font-lock-mode 1)
+              (when font-lock-defaults
+                (let ((font-lock-use-overlays nil))
+                  (font-lock-fontify-buffer)))))
+        (error
+         (message "Syntax highlighting for %s failed: %s" filename (error-message-string err)))))
+
+    ;; Highlight search matches on top of syntax highlighting.
+    (goto-char (point-min))
+    (let ((case-fold-search t))
+      (when (stringp search-term)
+        (dolist (word (split-string search-term "[ \t\n]+" t))
+          (when (> (length word) 0)
+            (goto-char (point-min))
+            (while (re-search-forward (concat "\\<" (regexp-quote word)) nil t)
+              (put-text-property (match-beginning 0) (match-end 0)
+                                 'face 'probe-search-match-face))))))
+    (buffer-string)))
 
 (defun probe-search--insert-json-results-enhanced (json-data)
   "Insert JSON results from probe search with enhanced formatting.
@@ -209,6 +165,47 @@ JSON-DATA is the parsed JSON response from probe."
     (setq buffer-read-only t)
     (goto-char (point-min))
     (forward-line 1)))
+
+(defun probe-search--test-apply-syntax-highlighting ()
+  "Test `probe-search--apply-syntax-highlighting`."
+  (interactive)
+  (message "Running syntax highlighting tests...")
+  (let ((failures 0)
+        (successes 0))
+    (cl-flet ((expect-face-at (description code filename search-term pos expected-face)
+                (let* ((result (probe-search--apply-syntax-highlighting code filename search-term))
+                       (face-found (get-text-property pos 'face result)))
+                  (if (equal face-found expected-face)
+                      (progn (setq successes (1+ successes))
+                             (message "PASS: %s" description))
+                    (progn (setq failures (1+ failures))
+                           (message "FAIL: %s. Expected '%s' at pos %d, found '%s'" description expected-face pos face-found))))))
+
+      ;; Python test
+      (expect-face-at "Python keyword"
+                      "def my_func():" "test.py" "other"
+                      0 'font-lock-keyword-face)
+
+      ;; Elisp test
+      (expect-face-at "Elisp keyword"
+                      "(defun my-func () \"docstring\")" "test.el" "other"
+                      1 'font-lock-keyword-face)
+
+      ;; Elisp string test
+      (expect-face-at "Elisp string"
+                      "(defun my-func () \"docstring\")" "test.el" "other"
+                      19 'font-lock-string-face)
+
+      ;; Javascript test
+      (expect-face-at "JavaScript keyword"
+                      "function myFunc() { return 1; }" "test.js" "other"
+                      0 'font-lock-keyword-face)
+
+      ;; Test fallback for unknown file type (should have no face)
+      (expect-face-at "Fallback (no face)"
+                      "hello world" "test.unknown" "world"
+                      0 nil))
+    (message "Tests finished. %d successes, %d failures." successes failures)))
 
 (provide 'probe-search-enhanced)
 ;;; probe-search-enhanced.el ends here

@@ -7,9 +7,12 @@ AI-friendly, fully local semantic code search for Emacs powered by [probe](https
 - **Semantic Code Search**: Search through code understanding its structure and meaning
 - **AST-based Queries**: Query code using Abstract Syntax Tree patterns
 - **Project-Aware**: Automatically detects and searches within project boundaries
-- **Enhanced UI**: Syntax highlighting and intuitive result navigation
+- **Enhanced UI**: Syntax highlighting and intuitive result navigation with file collapse/expand capabilities
 - **Fast & Local**: No cloud dependencies, all processing happens locally
 - **Test Filtering**: Option to include/exclude test files from results
+- **Comprehensive Testing**: Built-in test suite for syntax highlighting and search functionality
+- **Robust Error Handling**: Enhanced error handling throughout the codebase
+- **Advanced Syntax Highlighting**: Word boundary matching for precise search term highlighting
 
 ## Screenshots
 
@@ -59,6 +62,7 @@ git clone https://github.com/edmondfrank/probe.el.git
 | `s`   | Start new text search      |
 | `a`   | Start new AST query        |
 | `t`   | Toggle test file inclusion |
+| `TAB` | Toggle file section visibility |
 
 ### Example Searches
 
@@ -135,6 +139,31 @@ The package includes an optional enhanced UI with syntax highlighting:
 (require 'probe-search-enhanced)
 ```
 
+### File Navigation and Collapse
+
+Search results now include advanced file management features:
+
+- **File Collapse/Expand**: Press `TAB` to collapse or expand individual file sections
+- **Visual Indicators**: Collapsed files show `[+]` indicator with click-to-expand functionality
+- **Persistent State**: File collapse state is maintained during search sessions
+- **Improved Navigation**: Enhanced result traversal with better visual feedback
+
+### Testing Capabilities
+
+The package includes comprehensive test functions to verify functionality:
+
+```elisp
+;; Test search term highlighting
+M-x probe-search--test-highlight-matches RET
+
+;; Test syntax highlighting (if enhanced UI available)
+M-x probe-search--test-apply-syntax-highlighting RET
+```
+
+Built-in test functions:
+- **`probe-search--test-highlight-matches`** - Tests word boundary matching for search term highlighting
+- **`probe-search--test-apply-syntax-highlighting`** - Tests syntax highlighting functionality
+
 ### Project Integration
 
 probe.el automatically integrates with Emacs project.el to detect project boundaries:
@@ -191,6 +220,16 @@ Limit the number of results:
 (setq probe-search-max-results 50)
 ```
 
+### Error handling
+
+The package includes robust error handling for common issues:
+
+- **JSON parsing errors**: Detailed error messages with output preview
+- **Process errors**: Clear indication when probe command fails
+- **Missing dependencies**: Helpful messages when required tools are not found
+
+If you encounter errors, check the search results buffer for detailed error messages that can help diagnose the issue.
+
 ## Contributing
 
 Contributions are welcome! Please:
@@ -216,6 +255,38 @@ make test
 
 # Run linting
 make lint
+```
+
+### Testing
+
+The package includes built-in test functions for development and verification:
+
+#### Running Tests
+
+```elisp
+;; Test search term highlighting functionality
+M-x probe-search--test-highlight-matches
+
+;; Test syntax highlighting (requires enhanced UI)
+M-x probe-search--test-apply-syntax-highlighting
+```
+
+#### Test Coverage
+
+- **Search highlighting**: Tests word boundary matching and case-insensitive search
+- **Syntax highlighting**: Tests code syntax highlighting for various languages
+- **Error handling**: Tests robust error handling for malformed input
+- **File operations**: Tests file collapse/expand functionality
+
+#### Custom Testing
+
+You can add your own test cases by extending the existing test functions:
+
+```elisp
+(defun my-probe-search-test ()
+  "Custom test for probe search functionality."
+  ;; Add your test cases here
+  )
 ```
 
 ## License
